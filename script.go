@@ -19,22 +19,30 @@ import (
 var bucket = flag.String("bucket", "", "S3 Bucket to copy contents from. (required)")
 var concurrency = flag.Int("concurrency", 500, "Number of concurrent connections to use.")
 var queueSize = flag.Int("queueSize", 3000, "Size of the queue")
+var env = flag.String("env", "DEV", "Environment")
 
 func main() {
 	flag.Parse()
+
 	if len(*bucket) == 0 {
 		flag.Usage()
 		os.Exit(-1)
 	}
 
+	// set up aws session and s3 client
 	awsSess, err := session.NewSession(aws.NewConfig())
 	if err != nil {
 		log.Fatalf("Failed to create a new session. %v", err)
 	}
 	s3Client := s3.New(awsSess, aws.NewConfig().WithRegion("eu-central-1"))
 
-
-	var redisPool = newPool()
+	var redisHost string
+	if *env == "DEV" {
+		redisHost = ":6379"
+	} else {
+		redisHost = "context-staging.czhgsk.clustercfg.euc1.cache.amazonaws.com:6379"
+	}
+	var redisPool = newPool(redisHost) // create redis connection pool
 
 	DownloadBucket(s3Client, *redisPool, *bucket, *concurrency, *queueSize)
 }
@@ -115,12 +123,12 @@ func (c *Copier) Upload(key, data string) error {
 	return err
 }
 
-func newPool() *redis.Pool {
+func newPool(redisHost string) *redis.Pool {
 	return &redis.Pool{
 		MaxIdle: 80,
 		MaxActive: 12000, // max number of connections
 		Dial: func() (redis.Conn, error) {
-			c, err := redis.Dial("tcp", ":6379")
+			c, err := redis.Dial("tcp", redisHost)
 			if err != nil {
 				panic(err.Error())
 			}
