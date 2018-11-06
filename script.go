@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"github.com/gomodule/redigo/redis"
 	"io/ioutil"
 	"log"
@@ -20,6 +21,7 @@ var bucket = flag.String("bucket", "", "S3 Bucket to copy contents from. (requir
 var concurrency = flag.Int("concurrency", 500, "Number of concurrent connections to use.")
 var queueSize = flag.Int("queueSize", 3000, "Size of the queue")
 var env = flag.String("env", "DEV", "Environment")
+var startAfter = flag.String("startAfter", "", "Key from where you want to start iterating.")
 
 func main() {
 	flag.Parse()
@@ -43,36 +45,44 @@ func main() {
 		redisHost = "context-staging.czhgsk.clustercfg.euc1.cache.amazonaws.com:6379"
 	}
 	var redisPool = newPool(redisHost) // create redis connection pool
-
-	DownloadBucket(s3Client, *redisPool, *bucket, *concurrency, *queueSize)
+	DownloadBucket(s3Client, *redisPool, *bucket, *concurrency, *queueSize, startAfter)
 }
 
-func DownloadBucket(client *s3.S3, redisPool redis.Pool,bucket string, concurrency, queueSize int) {
+func DownloadBucket(client *s3.S3, redisPool redis.Pool, bucket string, concurrency, queueSize int, startAfter *string) {
 	keysChan := make(chan string, queueSize)
 	cpyr := &Copier{
 		client: client,
 		bucket: bucket,
 		pool: redisPool,
 	}
+
 	wg := new(sync.WaitGroup)
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for key := range keysChan {
+				startAfter = &key // so that startAfter points to the key of this goroutine
+				fmt.Println(*startAfter)
 				data, err := cpyr.Download(key)
 				if err != nil {
 					log.Printf("Failed to download key %v, due to %v", key, err)
+					logNextStartKey(key, err)
+
 				}
 				err = cpyr.Upload(key, data)
 				if err != nil {
 					log.Printf("Failed to upload key %v, due to %v", key, err)
+					logNextStartKey(key, err)
 				}
 			}
 		}()
 	}
 
-	req := &s3.ListObjectsV2Input{Bucket: aws.String(bucket)}
+	req := &s3.ListObjectsV2Input{
+		Bucket: aws.String(bucket),
+		StartAfter: aws.String(*startAfter),
+	}
 	err := client.ListObjectsV2Pages(req, func(resp *s3.ListObjectsV2Output, lastPage bool) bool {
 		for _, content := range resp.Contents {
 			key := *content.Key
@@ -136,4 +146,8 @@ func newPool(redisHost string) *redis.Pool {
 		},
 	}
 
+}
+
+func logNextStartKey(startAfterKey string, err error) {
+	log.Fatalf("Process aborted due to error. Start after %s. Error: %v", startAfterKey, err)
 }
