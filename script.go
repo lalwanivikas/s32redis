@@ -118,8 +118,8 @@ func (c *Copier) Download(key string) (string, error) {
 
 func (c *Copier) Upload(key, data string) error {
 	conn := c.pool.Get()
+	defer conn.Close()
 	_, err := conn.Do("SET", key, data)
-
 	if err != nil {
 		log.Fatalf("Failed to write %s to redis. %v", key, err)
 	}
