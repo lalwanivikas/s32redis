@@ -66,14 +66,14 @@ func DownloadBucket(client *s3.S3, redisPool redis.Pool, bucket string, concurre
 				fmt.Println(*startAfter)
 				data, err := cpyr.Download(key)
 				if err != nil {
-					log.Printf("Failed to download key %v, due to %v", key, err)
-					logNextStartKey(key, err)
+					//log.Printf("Failed to download key %v, due to %v", key, err)
+					logNextStartKey(*startAfter, err)
 
 				}
 				err = cpyr.Upload(key, data)
 				if err != nil {
-					log.Printf("Failed to upload key %v, due to %v", key, err)
-					logNextStartKey(key, err)
+					//log.Printf("Failed to upload key %v, due to %v", key, err)
+					logNextStartKey(*startAfter, err)
 				}
 			}
 		}()
@@ -92,7 +92,8 @@ func DownloadBucket(client *s3.S3, redisPool redis.Pool, bucket string, concurre
 	})
 	close(keysChan)
 	if err != nil {
-		log.Printf("Failed to list objects for bucket %v: %v", bucket, err)
+		//log.Printf("Failed to list objects for bucket %v: %v", bucket, err)
+		logNextStartKey(*startAfter, err)
 	}
 	wg.Wait()
 	log.Println("Done")
