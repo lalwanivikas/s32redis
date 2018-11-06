@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"github.com/gomodule/redigo/redis"
 	"io/ioutil"
 	"log"
@@ -45,10 +44,10 @@ func main() {
 		redisHost = "context-staging.czhgsk.clustercfg.euc1.cache.amazonaws.com:6379"
 	}
 	var redisPool = newPool(redisHost) // create redis connection pool
-	DownloadBucket(s3Client, *redisPool, *bucket, *concurrency, *queueSize, startAfter)
+	DownloadBucket(s3Client, *redisPool, *bucket, *concurrency, *queueSize, *startAfter)
 }
 
-func DownloadBucket(client *s3.S3, redisPool redis.Pool, bucket string, concurrency, queueSize int, startAfter *string) {
+func DownloadBucket(client *s3.S3, redisPool redis.Pool, bucket string, concurrency, queueSize int, startAfter string) {
 	keysChan := make(chan string, queueSize)
 	cpyr := &Copier{
 		client: client,
@@ -62,18 +61,13 @@ func DownloadBucket(client *s3.S3, redisPool redis.Pool, bucket string, concurre
 		go func() {
 			defer wg.Done()
 			for key := range keysChan {
-				startAfter = &key // so that startAfter points to the key of this goroutine
-				fmt.Println(*startAfter)
 				data, err := cpyr.Download(key)
 				if err != nil {
-					//log.Printf("Failed to download key %v, due to %v", key, err)
-					logNextStartKey(*startAfter, err)
-
+					logNextStartKey(key, err)
 				}
 				err = cpyr.Upload(key, data)
 				if err != nil {
-					//log.Printf("Failed to upload key %v, due to %v", key, err)
-					logNextStartKey(*startAfter, err)
+					logNextStartKey(key, err)
 				}
 			}
 		}()
@@ -81,7 +75,7 @@ func DownloadBucket(client *s3.S3, redisPool redis.Pool, bucket string, concurre
 
 	req := &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket),
-		StartAfter: aws.String(*startAfter),
+		StartAfter: aws.String(startAfter),
 	}
 	err := client.ListObjectsV2Pages(req, func(resp *s3.ListObjectsV2Output, lastPage bool) bool {
 		for _, content := range resp.Contents {
@@ -92,8 +86,7 @@ func DownloadBucket(client *s3.S3, redisPool redis.Pool, bucket string, concurre
 	})
 	close(keysChan)
 	if err != nil {
-		//log.Printf("Failed to list objects for bucket %v: %v", bucket, err)
-		logNextStartKey(*startAfter, err)
+		log.Printf("Failed to list objects for bucket %v: %v. Current value for StartAfter is %s", bucket, err, startAfter)
 	}
 	wg.Wait()
 	log.Println("Done")
@@ -146,9 +139,8 @@ func newPool(redisHost string) *redis.Pool {
 			return c, err
 		},
 	}
-
 }
 
 func logNextStartKey(startAfterKey string, err error) {
-	log.Fatalf("Process aborted due to error. Start after %s. Error: %v", startAfterKey, err)
+	log.Fatalf("Process aborted due to error. Start after this key: %s. Error: %v", startAfterKey, err)
 }
